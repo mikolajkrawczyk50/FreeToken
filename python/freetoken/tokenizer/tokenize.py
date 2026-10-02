@@ -108,6 +108,27 @@ class TokenizeManager:
             )
         if tools is not None:
             chat_template_kwargs = {**chat_template_kwargs, "tools": tools}
+        if any(m.get("role") in ("developer", "function") for m in messages):
+            messages = [
+                dict(m, role="system") if m.get("role") == "developer"
+                else dict(m, role="tool") if m.get("role") == "function"
+                else m
+                for m in messages
+            ]
+        if len(messages) > 1 and messages[0].get("role") == "system" and messages[1].get("role") == "system":
+            lead_idx = 0
+            while lead_idx < len(messages) and messages[lead_idx].get("role") == "system":
+                lead_idx += 1
+            sys_content = "\n\n".join(
+                str(m.get("content") or "") for m in messages[:lead_idx] if m.get("content")
+            )
+            first = dict(messages[0], content=sys_content)
+            rest = [
+                dict(m, role="user", content=f"[System instruction]: {m.get('content', '')}")
+                if m.get("role") == "system" else m
+                for m in messages[lead_idx:]
+            ]
+            messages = [first, *rest]
         prompt = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,

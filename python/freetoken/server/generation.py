@@ -189,13 +189,55 @@ def resolve_sampling(
 
 def render_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize OpenAI-shaped message dicts for the chat template: flatten text
-    content parts to a string and decode tool-call arguments from JSON. Raises
-    ValueError on a non-text content part (text-only server). Shared by all adapters."""
-    return [_render_message(m) for m in messages]
+    content parts to a string, decode tool-call arguments from JSON, map developer/function
+    roles, and consolidate system messages. Raises ValueError on a non-text content part
+    (text-only server). Shared by all adapters."""
+    rendered = [_render_message(m) for m in messages]
+    if not rendered:
+        return rendered
+
+    # Chat templates (e.g. Qwen, Gemma, Mistral) only accept system messages at the very
+    # beginning (loop.first) and raise if multiple or mid-conversation system messages appear.
+    # Group any consecutive leading system messages into a single system message.
+    leading_systems: list[dict[str, Any]] = []
+    idx = 0
+    while idx < len(rendered) and rendered[idx].get("role") == "system":
+        leading_systems.append(rendered[idx])
+        idx += 1
+
+    normalized: list[dict[str, Any]] = []
+    if leading_systems:
+        first_m = dict(leading_systems[0])
+        sys_texts = [
+            str(m.get("content") or "")
+            for m in leading_systems
+            if m.get("content")
+        ]
+        first_m["content"] = "\n\n".join(sys_texts)
+        normalized.append(first_m)
+
+    for m in rendered[idx:]:
+        # If a system message appears after the conversation has begun, convert it
+        # to a user message so strict chat templates accept it cleanly.
+        if m.get("role") == "system":
+            m_converted = dict(m)
+            m_converted["role"] = "user"
+            content = m_converted.get("content", "")
+            m_converted["content"] = f"[System instruction]: {content}" if content else ""
+            normalized.append(m_converted)
+        else:
+            normalized.append(m)
+
+    return normalized
 
 
 def _render_message(message: dict[str, Any]) -> dict[str, Any]:
     m = dict(message)
+    role = m.get("role")
+    if role == "developer":
+        m["role"] = "system"
+    elif role == "function":
+        m["role"] = "tool"
     content = m.get("content")
     if isinstance(content, list):
         m["content"] = _flatten_text_parts(content)
