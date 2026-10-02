@@ -211,7 +211,7 @@ def _causal_conv1d_fwd_tiled_kernel(
                 + feat_x[None, :]
             )
             mask_xw = (idx_last >= 0)[:, None] & (idx_last < seqlen)[:, None] & mfc
-            new_cs = tl.load(xw_ptrs, mask_xw, 0.0)
+            new_cs = tl.load(xw_ptrs, mask_xw, 0.0).to(conv_states_base.dtype.element_ty)
         else:
             VAL = state_len - seqlen
             xw_ptrs = (
@@ -221,7 +221,7 @@ def _causal_conv1d_fwd_tiled_kernel(
                 + ((idx_tok - VAL) * stride_x_token)[:, None]
             )
             mask_xw = (idx_tok - VAL >= 0)[:, None] & (idx_tok - VAL < seqlen)[:, None] & mfc
-            new_cs = tl.load(xw_ptrs, mask_xw, 0.0)
+            new_cs = tl.load(xw_ptrs, mask_xw, 0.0).to(conv_states_base.dtype.element_ty)
             if HAS_INITIAL_STATES:
                 if load_init_state:
                     src_ptrs = (
@@ -235,7 +235,7 @@ def _causal_conv1d_fwd_tiled_kernel(
                         & ((idx_tok + seqlen) < state_len)[:, None]
                         & mfc
                     )
-                    old = tl.load(src_ptrs, mask_src, 0.0)
+                    old = tl.load(src_ptrs, mask_src, 0.0).to(conv_states_base.dtype.element_ty)
                     new_cs = tl.where(mask_src, old, new_cs)
         tgt = conv_states_base[None, :] + (idx_tok * stride_conv_state_tok)[:, None]
         mask_t = (idx_tok < state_len)[:, None] & mfc
@@ -335,7 +335,7 @@ def _causal_conv1d_update_kernel(
         & (idx_tokens - VAL < seqlen)[:, None]
         & (idx_feats < dim)[None, :]
     )
-    loaded_x = tl.load(x_ptrs, mask_x, 0.0)
+    loaded_x = tl.load(x_ptrs, mask_x, 0.0).to(conv_state.dtype)
     tl.debug_barrier()
     new_conv_state = tl.where(mask, conv_state, loaded_x)
 

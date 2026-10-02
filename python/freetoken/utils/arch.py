@@ -1,7 +1,60 @@
 from __future__ import annotations
 
 import functools
+import os
+import re
 from typing import Tuple
+
+
+_GFX_ARCH_RE = re.compile(r"gfx\d+[a-z]?")
+
+
+def _gfx_arch_from(value: object) -> str | None:
+    match = _GFX_ARCH_RE.search(str(value).lower())
+    return match.group(0) if match else None
+
+
+@functools.cache
+def is_rocm() -> bool:
+    """True when torch is built for ROCm (AMD GPU) instead of CUDA."""
+    import torch
+    return getattr(torch.version, "hip", None) is not None
+
+
+is_hip = is_rocm
+
+
+@functools.cache
+def get_rocm_gfx_arch() -> str | None:
+    """Return the current AMD GPU target (for example ``gfx1201``).
+
+    Prefer the runtime device because build variables may contain multiple
+    semicolon-separated targets. Environment variables remain useful for
+    cross-compilation and systems where no GPU is currently visible; in that
+    fallback mode the first target is returned. The result is process-cached
+    for FreeToken's one-process-per-GPU execution model, so callers must select
+    the intended device before the first call.
+    """
+    if not is_rocm():
+        return None
+
+    import torch
+
+    if torch.cuda.is_available():
+        try:
+            props = torch.cuda.get_device_properties(torch.cuda.current_device())
+            for attr in ("gcnArchName", "arch"):
+                arch = _gfx_arch_from(getattr(props, attr, ""))
+                if arch:
+                    return arch
+        except (AttributeError, RuntimeError):
+            pass
+
+    for env_var in ("FREETOKEN_ROCM_ARCH", "PYTORCH_ROCM_ARCH", "HCC_AMDGPU_TARGET"):
+        arch = _gfx_arch_from(os.getenv(env_var, ""))
+        if arch:
+            return arch
+    return None
 
 
 @functools.cache
@@ -9,6 +62,8 @@ def _get_torch_cuda_version() -> Tuple[int, int] | None:
     import torch
     import torch.version
 
+    if is_rocm():
+        return None
     if not torch.cuda.is_available() or not torch.version.cuda:
         return None
     return torch.cuda.get_device_capability()
@@ -46,3 +101,22 @@ def is_sm90_supported() -> bool:
 
 def is_sm100_supported() -> bool:
     return is_arch_supported(10, 0)
+
+
+@functools.cache
+def is_bf16_supported() -> bool:
+    """True when the current device natively supports bfloat16 dot products and operations.
+
+    On ROCm, RDNA1/RDNA2 (gfx10xx) and older Vega (gfx900, gfx906) lack hardware
+    BF16 dot instructions (v_dot2_f32_bf16), which causes Triton JIT and LLVM intrinsic
+    compilation failures (%llvm.amdgcn.fdot2.bf16.bf16).
+    """
+    if is_rocm():
+        arch = get_rocm_gfx_arch()
+        if arch and (arch.startswith("gfx10") or arch in ("gfx900", "gfx906")):
+            return False
+        return True
+    import torch
+    if not torch.cuda.is_available():
+        return False
+    return torch.cuda.is_bf16_supported()

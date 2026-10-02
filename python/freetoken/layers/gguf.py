@@ -265,6 +265,7 @@ class GGUFEmbedding(BaseOP):
         embedding_dim: int,
         quant_type: int,
         embed_scale: float | None = None,
+        dtype: torch.dtype | None = None,
     ):
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -274,18 +275,20 @@ class GGUFEmbedding(BaseOP):
         )
         self._embed_scale = embed_scale
         self._embed_scale_t: torch.Tensor | None = None
+        self.dtype = dtype or torch.get_default_dtype()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         from freetoken.kernel.gguf import ggml_dequantize
 
+        out_dtype = self.dtype
         flat = x.flatten()
         rows = self.qweight.index_select(0, flat)  # [n, row_bytes] packed
         if self._quant_type in GGML_UNQUANTIZED:
             # Raw value bytes, not blocks: there is no dequant kernel for the unquantized
             # types (ggml_dequantize rejects type 1), so reinterpret the gathered rows.
-            y = rows.view(_UNQUANTIZED_DTYPE[self._quant_type]).to(torch.bfloat16)
+            y = rows.view(_UNQUANTIZED_DTYPE[self._quant_type]).to(out_dtype)
         else:
-            y = ggml_dequantize(rows, self._quant_type, flat.shape[0], self.embedding_dim, torch.bfloat16)
+            y = ggml_dequantize(rows, self._quant_type, flat.shape[0], self.embedding_dim, out_dtype)
         y = y.view(*x.shape, self.embedding_dim)
         if self._embed_scale is not None:
             if self._embed_scale_t is None:

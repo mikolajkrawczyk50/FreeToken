@@ -51,19 +51,46 @@ def gguf_expert_types(model_path: str, num_layers: int) -> dict[str, list[int]]:
     up_types: list[int | None] = [None] * num_layers
     down_types: list[int | None] = [None] * num_layers
 
-    for t in iter_gguf_tensors(model_path):
-        if not t.name.startswith("blk."):
-            continue
-        layer = int(t.name.split(".")[1])
-        if layer >= num_layers:
-            continue  # skip the trailing NextN/MTP block
+    try:
+        for t in iter_gguf_tensors(model_path):
+            if not t.name.startswith("blk."):
+                continue
+            layer = int(t.name.split(".")[1])
+            if layer >= num_layers:
+                continue  # skip the trailing NextN/MTP block
 
-        if t.name.endswith("ffn_gate_exps.weight"):
-            gate_types[layer] = t.ggml_type
-        elif t.name.endswith("ffn_up_exps.weight"):
-            up_types[layer] = t.ggml_type
-        elif t.name.endswith("ffn_down_exps.weight"):
-            down_types[layer] = t.ggml_type
+            if t.name.endswith("ffn_gate_exps.weight"):
+                gate_types[layer] = t.ggml_type
+            elif t.name.endswith("ffn_up_exps.weight"):
+                up_types[layer] = t.ggml_type
+            elif t.name.endswith("ffn_down_exps.weight"):
+                down_types[layer] = t.ggml_type
+    except Exception:
+        pass
+
+    if any(g is None for g in gate_types) or any(d is None for d in down_types):
+        import json
+        import os
+
+        dir_path = os.path.dirname(model_path) if os.path.isfile(model_path) else model_path
+        ftw_json = os.path.join(dir_path, "freetoken_weight.json")
+        if os.path.isfile(ftw_json):
+            with open(ftw_json) as f:
+                meta = json.load(f)
+            if "gguf_expert_types" in meta and meta["gguf_expert_types"]:
+                gt, dt = meta["gguf_expert_types"]
+                return {"gate_up": list(gt), "down": list(dt)}
+            qmap = meta.get("quant_types", {})
+            for layer in range(num_layers):
+                if gate_types[layer] is None:
+                    gate_types[layer] = qmap.get(f"{layer}:ffn_gate_exps.weight")
+                if up_types[layer] is None:
+                    up_types[layer] = qmap.get(f"{layer}:ffn_up_exps.weight")
+                if down_types[layer] is None:
+                    down_types[layer] = qmap.get(f"{layer}:ffn_down_exps.weight")
+            src = meta.get("source_model_path")
+            if (any(g is None for g in gate_types) or any(d is None for d in down_types)) and src and os.path.exists(src) and os.path.abspath(src) != os.path.abspath(model_path):
+                return gguf_expert_types(src, num_layers)
 
     # Validate that gate and up types agree for each layer (they must be row-concatenated).
     gate_up_types: list[int] = []

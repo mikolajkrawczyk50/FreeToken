@@ -277,14 +277,22 @@ def convert_checkpoint(
     _progress("finalize")  # writing shard index + copying config/tokenizer
     copied = _copy_metadata(model_path, out_dir)
 
-    try:
-        fingerprint = _source_fingerprint(model_path, mc, device=dev)
-    except Exception:
-        fingerprint = None
+    quant_types = None
+    from freetoken.models.gguf.reader import is_gguf_path
+    if is_gguf_path(model_path):
+        from freetoken.models.qwen3_5_moe.gguf import _scan_quant_types
+        try:
+            qmap = _scan_quant_types(model_path)
+            if qmap:
+                quant_types = {f"{k[0]}:{k[1]}": v for k, v in qmap.items()}
+        except Exception:
+            pass
 
     index = writer.finalize({
         "source_model_path": os.path.abspath(model_path),
         "fingerprint": fingerprint,
+        "quant_types": quant_types,
+        "gguf_expert_types": getattr(banks, "gguf_expert_types", None) if offload else None,
         # quant_format records the actual on-disk bank layout (e.g. nvfp4_marlin vs
         # nvfp4_b12x): the suffix is a runtime backend pick (GPU capability / env), NOT in
         # config, and the stored bytes are physically repacked into it -- so it's kept and

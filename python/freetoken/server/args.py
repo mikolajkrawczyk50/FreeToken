@@ -139,9 +139,11 @@ def parse_args(
         if "gemma4" in marker:
             return "gemma4"
         if (
-            "qwen3_5" in marker
+            "qwen3" in marker
+            or "qwen3_5" in marker
             or "qwen3.5" in marker
-            or ("qwen3" in marker and "coder" in marker)
+            or "qwen35" in marker
+            or "ornith" in marker
         ):
             return "qwen3_coder"
         if "qwen" in marker:
@@ -666,6 +668,7 @@ def parse_args(
     # ``dtype`` key rather than top-level ``torch_dtype``, so check both; default bf16.
     if (dtype_str := kwargs["dtype"]) in ("auto", None):
         from freetoken.utils import cached_load_hf_config
+        from freetoken.utils.arch import is_bf16_supported
 
         cfg = cached_load_hf_config(kwargs["model_path"]).to_dict()
         text_cfg = cfg.get("text_config") or {}
@@ -673,6 +676,10 @@ def parse_args(
             cfg.get("torch_dtype") or cfg.get("dtype")
             or text_cfg.get("torch_dtype") or text_cfg.get("dtype") or "bfloat16"
         )
+        if dtype_str == "bfloat16" and not is_bf16_supported():
+            logger = init_logger(__name__)
+            logger.info("Target GPU does not natively support bfloat16; auto-selecting float16.")
+            dtype_str = "float16"
 
     DTYPE_MAP = {
         "float16": torch.float16,

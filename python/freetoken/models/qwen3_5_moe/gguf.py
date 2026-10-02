@@ -34,6 +34,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Iterator
 
+import os
+
 import torch
 
 # Verify that LinearGatedDeltaGroupConfig is available for isinstance checks
@@ -326,15 +328,36 @@ def _scan_quant_types(model_path: str) -> dict[tuple[int, str], int]:
     from freetoken.models.gguf.reader import iter_gguf_tensors
 
     quant_types = {}
-    for t in iter_gguf_tensors(model_path):
-        if not t.name.startswith("blk."):
-            # Globals (token_embd.weight, output.weight, output_norm.weight) keyed under
-            # layer -1 so the swap can size the embedding and lm_head from the file too.
-            quant_types[(-1, t.name)] = t.ggml_type
-            continue
-        _, idx, suffix = t.name.split(".", 2)
-        layer = int(idx)
-        quant_types[(layer, suffix)] = t.ggml_type
+    try:
+        for t in iter_gguf_tensors(model_path):
+            if not t.name.startswith("blk."):
+                # Globals (token_embd.weight, output.weight, output_norm.weight) keyed under
+                # layer -1 so the swap can size the embedding and lm_head from the file too.
+                quant_types[(-1, t.name)] = t.ggml_type
+                continue
+            _, idx, suffix = t.name.split(".", 2)
+            layer = int(idx)
+            quant_types[(layer, suffix)] = t.ggml_type
+    except Exception:
+        pass
+
+    if not quant_types:
+        dir_path = os.path.dirname(model_path) if os.path.isfile(model_path) else model_path
+        ftw_json = os.path.join(dir_path, "freetoken_weight.json")
+        if os.path.isfile(ftw_json):
+            import json
+
+            with open(ftw_json) as f:
+                meta = json.load(f)
+            if "quant_types" in meta:
+                return {
+                    (int(k.split(":", 1)[0]), k.split(":", 1)[1]): v
+                    for k, v in meta["quant_types"].items()
+                }
+            src = meta.get("source_model_path")
+            if src and os.path.exists(src) and os.path.abspath(src) != os.path.abspath(model_path):
+                return _scan_quant_types(src)
+
     return quant_types
 
 
@@ -880,10 +903,15 @@ def convert_qwen35_to_gguf(model, config: ModelConfig, *, model_path: str) -> No
         )
 
     inner = model.model
+    embed_dtype = (
+        getattr(inner.embed_tokens, "weight", None) is not None
+        and inner.embed_tokens.weight.dtype
+    ) or torch.get_default_dtype()
     embed = GGUFEmbedding(
         num_embeddings=config.vocab_size,
         embedding_dim=config.hidden_size,
         quant_type=qt(-1, "token_embd.weight"),
+        dtype=embed_dtype,
     )
     inner.embed_tokens = embed
 

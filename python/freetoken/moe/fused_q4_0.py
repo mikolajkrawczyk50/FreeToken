@@ -79,9 +79,9 @@ def fused_experts_gguf(
     inter = act_fn(gate_up)
     # down: each of the num_tokens*top_k intermediate rows uses its own expert id.
     out = ggml_moe_a8_vec(inter, down_q, topk_ids, 1, int(down_quant_type), h, num_tokens * top_k)
-    out = out.reshape(num_tokens, top_k, h) * topk_weights.reshape(num_tokens, top_k, 1).to(
-        out.dtype
-    )
+    del gate_up, inter
+    out = out.reshape(num_tokens, top_k, h)
+    out.mul_(topk_weights.reshape(num_tokens, top_k, 1).to(out.dtype))
     return out.sum(dim=1)
 
 

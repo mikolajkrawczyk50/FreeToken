@@ -627,9 +627,32 @@ def load_ftw_banks(
     # alphas are the small per-expert scale vectors, distinguished by their reserved names
     # (not a separate kind); everything else under experts_bank is a weight source.
     alpha_kw = {n: alpha_hb[n].tensor for n in alpha_hb}
+    gguf_expert_types = reader.meta("gguf_expert_types")
+    if gguf_expert_types is None and reader.meta("quant_format") == "gguf":
+        quant_types = reader.meta("quant_types")
+        if quant_types:
+            try:
+                gate_up = [quant_types[f"{i}:ffn_gate_exps.weight"] for i in range(num_layers)]
+                down = [quant_types[f"{i}:ffn_down_exps.weight"] for i in range(num_layers)]
+                if all(g is not None for g in gate_up) and all(d is not None for d in down):
+                    gguf_expert_types = (tuple(gate_up), tuple(down))
+            except Exception:
+                pass
+        if gguf_expert_types is None:
+            src = reader.meta("source_model_path")
+            if src and os.path.exists(src):
+                try:
+                    from freetoken.models.qwen3_5_moe.gguf_experts import gguf_expert_types as get_types
+
+                    types = get_types(src, num_layers)
+                    gguf_expert_types = (tuple(types["gate_up"]), tuple(types["down"]))
+                except Exception:
+                    pass
+
     return ExpertBanks(
         reader.meta("quant_format"), sources, **alpha_kw,
         layer_residency=applied,
+        gguf_expert_types=tuple(tuple(t) for t in gguf_expert_types) if gguf_expert_types else None,
     )
 
 

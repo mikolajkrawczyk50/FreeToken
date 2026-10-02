@@ -49,15 +49,35 @@ def _c_compiler_for(cxx: str) -> str:
 
 @functools.cache
 def _module():
-    from torch.utils.cpp_extension import load
-
     import torch
+    import torch.utils.cpp_extension as cpp_ext
+    from torch.utils.cpp_extension import load
 
     on_hip = bool(getattr(torch.version, "hip", None))
     extra_cuda_cflags = ["-O3"]
+    extra_cflags = ["-O3"]
     if not on_hip:
         # nvcc-only flag; hipcc already has relaxed constexpr as default.
         extra_cuda_cflags.append("--expt-relaxed-constexpr")
+    else:
+        # Filter /usr/include from cpp_extension system_includes on ROCm to prevent
+        # GCC 16 <cmath> #include_next <math.h> failure when -isystem /usr/include is emitted.
+        orig_include_paths = cpp_ext.include_paths
+        def _filtered_include_paths(*args, **kwargs):
+            return [p for p in orig_include_paths(*args, **kwargs) if p != "/usr/include"]
+        cpp_ext.include_paths = _filtered_include_paths
+
+        # Discover rocThrust / rocPRIM headers
+        thrust_candidates = [
+            pathlib.Path.home() / ".local" / "rocthrust" / "usr" / "include",
+            pathlib.Path("/opt/rocm/include"),
+        ]
+        for tc in thrust_candidates:
+            if (tc / "thrust" / "complex.h").exists():
+                extra_cuda_cflags.append(f"-I{tc}")
+                extra_cflags.append(f"-I{tc}")
+                break
+
     host_cxx = _host_compiler()
     if host_cxx is not None and not on_hip:
         # Point both nvcc's host pass (-ccbin) and torch's C++ compile (CXX) at a
@@ -75,6 +95,7 @@ def _module():
         sources=[str(_CSRC / "gguf_kernel.cu")],
         extra_include_paths=[str(_CSRC)],
         extra_cuda_cflags=extra_cuda_cflags,
+        extra_cflags=extra_cflags,
         verbose=True,
     )
 
