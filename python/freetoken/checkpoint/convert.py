@@ -276,6 +276,7 @@ def convert_checkpoint(
 
     _progress("finalize")  # writing shard index + copying config/tokenizer
     copied = _copy_metadata(model_path, out_dir)
+    fingerprint = _source_fingerprint(model_path, mc, device=dev)
 
     quant_types = None
     from freetoken.models.gguf.reader import is_gguf_path
