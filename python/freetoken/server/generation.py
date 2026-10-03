@@ -163,6 +163,9 @@ def resolve_sampling(
     ignore_eos: bool,
     model_sampling: dict[str, Any],
     stop: str | list[str] | None = None,
+    repetition_penalty: float | None = None,
+    frequency_penalty: float | None = None,
+    presence_penalty: float | None = None,
 ) -> SamplingParams:
     """Map a protocol's sampling fields onto the engine's neutral SamplingParams,
     filling unspecified fields from the checkpoint's recommended defaults."""
@@ -184,6 +187,9 @@ def resolve_sampling(
         top_k=pick(top_k, "top_k", -1),
         top_p=pick(top_p, "top_p", 1.0),
         stop_strs=[s for s in stop_list if s],  # drop empty strings (would match everything)
+        repetition_penalty=pick(repetition_penalty, "repetition_penalty", 1.0),
+        frequency_penalty=pick(frequency_penalty, "frequency_penalty", 0.0),
+        presence_penalty=pick(presence_penalty, "presence_penalty", 0.0),
     )
 
 

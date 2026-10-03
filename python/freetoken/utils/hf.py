@@ -113,6 +113,10 @@ def load_generation_sampling(model_path: str) -> dict[str, Any]:
             out["top_k"] = int(v)
         if (v := meta.get("general.sampling.top_p")) is not None:
             out["top_p"] = float(v)
+        if (v := meta.get("general.sampling.penalty_repeat")) is not None:
+            out["repetition_penalty"] = float(v)
+        elif (v := meta.get("general.sampling.repetition_penalty")) is not None:
+            out["repetition_penalty"] = float(v)
         return out
 
     try:
@@ -122,7 +126,7 @@ def load_generation_sampling(model_path: str) -> dict[str, Any]:
     if getattr(gc, "do_sample", None) is False:
         return {"temperature": 0.0}
     out: dict[str, Any] = {}
-    for key in ("temperature", "top_k", "top_p"):
+    for key in ("temperature", "top_k", "top_p", "repetition_penalty"):
         val = getattr(gc, key, None)
         if val is not None:
             out[key] = val

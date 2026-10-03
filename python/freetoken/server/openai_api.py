@@ -76,6 +76,9 @@ def chat_request_to_genspec(
             ignore_eos=req.ignore_eos,
             model_sampling=model_sampling,
             stop=req.stop,
+            repetition_penalty=getattr(req, "repetition_penalty", None),
+            frequency_penalty=req.frequency_penalty,
+            presence_penalty=req.presence_penalty,
         ),
         chat_template_kwargs=ctk,
         template_tools=_tools_for_template(req),
@@ -526,6 +529,9 @@ def _resolve_sampling(
         ignore_eos=req.ignore_eos,
         model_sampling=model_sampling,
         stop=req.stop,
+        repetition_penalty=getattr(req, "repetition_penalty", None),
+        frequency_penalty=req.frequency_penalty,
+        presence_penalty=req.presence_penalty,
     )
 
 
